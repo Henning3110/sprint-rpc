@@ -10,13 +10,12 @@ import { fetchServicesAndPackagesFromReflection } from './grpcReflection'
 app.name = 'SprintRPC'
 
 function createWindow(): void {
-  // Create the browser window.
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     show: false,
     autoHideMenuBar: true,
-    titleBarStyle: 'default', // standard clean title bar
+    titleBarStyle: 'default',
     title: 'SprintRPC',
     ...(process.platform !== 'darwin' ? { icon } : {}),
     webPreferences: {
@@ -34,8 +33,6 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // HMR for renderer base on electron-vite cli.
-  // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
