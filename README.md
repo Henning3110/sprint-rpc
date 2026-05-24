@@ -2,6 +2,8 @@
 
 SprintRPC is a light-weight, simple, and premium gRPC desktop client built with **Electron**, **React**, and **TypeScript**, styled using a sleek and high-performance **Material UI** theme. Designed for fast developer feedback loops, it automates request construction using dynamic schema rendering.
 
+More information can be found on the [website](sprintrpc.eu).
+
 ---
 
 ## Key Features
