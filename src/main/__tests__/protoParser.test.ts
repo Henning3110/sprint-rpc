@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest'
-import { parsePackageDefinition } from '../protoParser'
+import * as path from 'path'
+import { parsePackageDefinition, getAncestorDirectories } from '../protoParser'
 
 describe('gRPC Protobuf Schema Parser Unit Tests', () => {
   test('should parse unary services and methods successfully', () => {
@@ -222,7 +223,7 @@ describe('gRPC Protobuf Schema Parser Unit Tests', () => {
 
     const result = parsePackageDefinition(mockPackageDefinition)
     const method = result[0].services[0].methods[0]
-    
+
     expect(method.requestFields).toBeDefined()
     expect(method.requestFields).toHaveLength(2)
 
@@ -234,5 +235,19 @@ describe('gRPC Protobuf Schema Parser Unit Tests', () => {
     const streetField = addressField.fields.find((f: any) => f.name === 'street')
     expect(streetField).toBeDefined()
     expect(streetField.type).toBe('string')
+  })
+
+  test('should generate ancestor directories list correctly', () => {
+    const testPath = path.resolve(__dirname, 'mock/proto/v1/service.proto')
+    const result = getAncestorDirectories(testPath)
+
+    const expectedParent = path.resolve(__dirname, 'mock/proto/v1')
+    const expectedAncestor = path.resolve(__dirname, 'mock/proto')
+    const expectedRepoRoot = path.resolve(__dirname, '../..')
+
+    expect(result).toContain(expectedParent)
+    expect(result).toContain(expectedAncestor)
+    expect(result).toContain(expectedRepoRoot)
+    expect(result[0]).toBe(expectedParent)
   })
 })

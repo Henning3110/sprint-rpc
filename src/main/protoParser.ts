@@ -1,4 +1,5 @@
 import * as protoLoader from '@grpc/proto-loader'
+import * as path from 'path'
 import { ProtoPackage, ProtoService, ProtoMethod } from '../renderer/src/store/useGrpcStore'
 
 function findMessageTypeFields(typeName: string, messageTypes: Record<string, any>): any[] | null {
@@ -131,15 +132,36 @@ export function parsePackageDefinition(packageDefinition: any): ProtoPackage[] {
   return Object.values(packagesMap)
 }
 
+export function getAncestorDirectories(filePath: string): string[] {
+  const ancestors: string[] = []
+  try {
+    let currentDir = path.dirname(filePath)
+    while (true) {
+      ancestors.push(currentDir)
+      const parentDir = path.dirname(currentDir)
+      if (parentDir === currentDir) {
+        break
+      }
+      currentDir = parentDir
+    }
+  } catch (err) {
+    console.error('Error getting ancestor directories:', err)
+  }
+  return ancestors
+}
+
 export function parseProtoFile(protoPath: string, importPaths: string[] = []): ProtoPackage[] {
   try {
+    const ancestors = getAncestorDirectories(protoPath)
+    const resolvedImportPaths = Array.from(new Set([...importPaths, ...ancestors]))
+
     const packageDefinition = protoLoader.loadSync(protoPath, {
       keepCase: true,
       longs: String,
       enums: String,
       defaults: true,
       oneofs: true,
-      includeDirs: importPaths
+      includeDirs: resolvedImportPaths
     })
 
     return parsePackageDefinition(packageDefinition)

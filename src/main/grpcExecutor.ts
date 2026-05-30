@@ -2,6 +2,7 @@ import * as grpc from '@grpc/grpc-js'
 import * as protoLoader from '@grpc/proto-loader'
 import { BrowserWindow } from 'electron'
 import { GrpcResponse } from '../renderer/src/store/useGrpcStore'
+import { getAncestorDirectories } from './protoParser'
 
 // Keep track of active streams for client-streaming and bidirectional calls
 const activeStreams = new Map<string, any>()
@@ -80,13 +81,16 @@ export function executeRpcCall(
           )
         }
       } else {
+        const ancestors = getAncestorDirectories(options.protoPath)
+        const resolvedImportPaths = Array.from(new Set([...(options.importPaths || []), ...ancestors]))
+
         packageDefinition = protoLoader.loadSync(options.protoPath, {
           keepCase: true,
           longs: String,
           enums: String,
           defaults: true,
           oneofs: true,
-          includeDirs: options.importPaths
+          includeDirs: resolvedImportPaths
         })
       }
 
