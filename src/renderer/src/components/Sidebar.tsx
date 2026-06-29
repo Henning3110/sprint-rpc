@@ -283,20 +283,45 @@ export default function Sidebar() {
             />
 
             {packages.length > 0 && (
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, px: 0.5, mt: -0.5, mb: 0.5 }}>
+              <Box
+                sx={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: 1,
+                  px: 0.5,
+                  mt: -0.5,
+                  mb: 0.5
+                }}
+              >
                 <Button
                   size="small"
                   variant="text"
-                  sx={{ fontSize: '0.72rem', py: 0.1, minWidth: 0, textTransform: 'none', color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
+                  sx={{
+                    fontSize: '0.72rem',
+                    py: 0.1,
+                    minWidth: 0,
+                    textTransform: 'none',
+                    color: 'text.secondary',
+                    '&:hover': { color: 'primary.main' }
+                  }}
                   onClick={handleExpandAll}
                 >
                   Expand All
                 </Button>
-                <Typography variant="caption" sx={{ color: 'divider', alignSelf: 'center' }}>|</Typography>
+                <Typography variant="caption" sx={{ color: 'divider', alignSelf: 'center' }}>
+                  |
+                </Typography>
                 <Button
                   size="small"
                   variant="text"
-                  sx={{ fontSize: '0.72rem', py: 0.1, minWidth: 0, textTransform: 'none', color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
+                  sx={{
+                    fontSize: '0.72rem',
+                    py: 0.1,
+                    minWidth: 0,
+                    textTransform: 'none',
+                    color: 'text.secondary',
+                    '&:hover': { color: 'primary.main' }
+                  }}
                   onClick={handleCollapseAll}
                 >
                   Collapse All

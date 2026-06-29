@@ -16,18 +16,24 @@ import { Add, Delete, AccessTime, FolderOpen } from '@mui/icons-material'
 import { useGrpcStore } from '../store/useGrpcStore'
 
 // Mappings from proto field descriptor to UI type
-export function getFieldInputType(field: any): 'datetime' | 'text' | 'switch' | 'integer' | 'decimal' | 'message' {
+export function getFieldInputType(
+  field: any
+): 'datetime' | 'text' | 'switch' | 'integer' | 'decimal' | 'message' {
   if (field.typeName === '.google.protobuf.Timestamp') {
     return 'datetime'
   }
-  if (
-    field.type === 'message' ||
-    field.type === 'TYPE_MESSAGE' ||
-    (field.fields && Array.isArray(field.fields))
-  ) {
+
+  let type = field.type
+  if (typeof type === 'string') {
+    type = type.toLowerCase()
+    if (type.startsWith('type_')) {
+      type = type.substring(5)
+    }
+  }
+
+  if (type === 'message' || (field.fields && Array.isArray(field.fields))) {
     return 'message'
   }
-  const type = field.type
   if (type === 'bool') {
     return 'switch'
   }
@@ -174,9 +180,10 @@ const FormField: React.FC<FormFieldProps> = ({ field, path, parsedPayload, onUpd
     const arr = Array.isArray(rawValue) ? rawValue : []
 
     const handleAdd = () => {
-      const defaultValue = field.fields && field.fields.length > 0 
-        ? {} 
-        : getDefaultFieldValue({ ...field, repeated: false })
+      const defaultValue =
+        field.fields && field.fields.length > 0
+          ? {}
+          : getDefaultFieldValue({ ...field, repeated: false })
       onUpdate(path, [...arr, defaultValue])
     }
 
@@ -225,7 +232,10 @@ const FormField: React.FC<FormFieldProps> = ({ field, path, parsedPayload, onUpd
         <Divider sx={{ mb: 1.5 }} />
 
         {arr.length === 0 ? (
-          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', py: 1, fontStyle: 'italic' }}>
+          <Typography
+            variant="caption"
+            sx={{ color: 'text.secondary', display: 'block', py: 1, fontStyle: 'italic' }}
+          >
             No items. Click &quot;Add Item&quot; to populate.
           </Typography>
         ) : (
@@ -242,7 +252,10 @@ const FormField: React.FC<FormFieldProps> = ({ field, path, parsedPayload, onUpd
                         backgroundColor: '#ffffff'
                       }}
                     >
-                      <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', mb: 1, display: 'block' }}>
+                      <Typography
+                        variant="caption"
+                        sx={{ fontWeight: 600, color: 'text.secondary', mb: 1, display: 'block' }}
+                      >
                         Item #{idx + 1}
                       </Typography>
                       {field.fields.map((subField: any) => (
@@ -307,15 +320,16 @@ const FormField: React.FC<FormFieldProps> = ({ field, path, parsedPayload, onUpd
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {field.fields && field.fields.map((subField: any) => (
-            <FormField
-              key={subField.name}
-              field={subField}
-              path={[...path, subField.name]}
-              parsedPayload={parsedPayload}
-              onUpdate={onUpdate}
-            />
-          ))}
+          {field.fields &&
+            field.fields.map((subField: any) => (
+              <FormField
+                key={subField.name}
+                field={subField}
+                path={[...path, subField.name]}
+                parsedPayload={parsedPayload}
+                onUpdate={onUpdate}
+              />
+            ))}
         </Box>
       </Box>
     )
@@ -338,7 +352,10 @@ const FormField: React.FC<FormFieldProps> = ({ field, path, parsedPayload, onUpd
                 <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
                   {label}
                 </Typography>
-                <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
+                <Typography
+                  variant="caption"
+                  sx={{ color: 'text.secondary', fontFamily: 'monospace' }}
+                >
                   bool
                 </Typography>
               </Box>
@@ -369,7 +386,10 @@ const FormField: React.FC<FormFieldProps> = ({ field, path, parsedPayload, onUpd
             helperText={
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
                 <AccessTime sx={{ fontSize: 12, color: 'text.secondary' }} />
-                <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
+                <Typography
+                  variant="caption"
+                  sx={{ color: 'text.secondary', fontFamily: 'monospace' }}
+                >
                   google.protobuf.Timestamp (Seconds: {rawValue?.seconds || 0})
                 </Typography>
               </Box>
@@ -398,7 +418,10 @@ const FormField: React.FC<FormFieldProps> = ({ field, path, parsedPayload, onUpd
             }}
             fullWidth
             helperText={
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
+              <Typography
+                variant="caption"
+                sx={{ color: 'text.secondary', fontFamily: 'monospace' }}
+              >
                 {field.type} (integer)
               </Typography>
             }
@@ -423,7 +446,10 @@ const FormField: React.FC<FormFieldProps> = ({ field, path, parsedPayload, onUpd
             }}
             fullWidth
             helperText={
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
+              <Typography
+                variant="caption"
+                sx={{ color: 'text.secondary', fontFamily: 'monospace' }}
+              >
                 {field.type} (decimal)
               </Typography>
             }
@@ -447,7 +473,10 @@ const FormField: React.FC<FormFieldProps> = ({ field, path, parsedPayload, onUpd
             }}
             fullWidth
             helperText={
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
+              <Typography
+                variant="caption"
+                sx={{ color: 'text.secondary', fontFamily: 'monospace' }}
+              >
                 {field.type}
               </Typography>
             }
@@ -501,7 +530,8 @@ export const FormBuilder: React.FC = () => {
             Invalid JSON syntax detected
           </Typography>
           <Typography variant="body2" sx={{ fontSize: '0.825rem' }}>
-            The Dynamic Form Builder cannot be loaded because the current payload contains malformed JSON. Please switch to the **Raw JSON** tab, correct any syntax errors, and return here.
+            The Dynamic Form Builder cannot be loaded because the current payload contains malformed
+            JSON. Please switch to the **Raw JSON** tab, correct any syntax errors, and return here.
           </Typography>
         </Alert>
       </Box>
@@ -509,9 +539,10 @@ export const FormBuilder: React.FC = () => {
   }
 
   const handleUpdate = (path: (string | number)[], value: any) => {
-    const updated = (value === '' || value === undefined)
-      ? deleteDeepValue(parsedPayload, path)
-      : setDeepValue(parsedPayload, path, value)
+    const updated =
+      value === '' || value === undefined
+        ? deleteDeepValue(parsedPayload, path)
+        : setDeepValue(parsedPayload, path, value)
     setPayload(JSON.stringify(updated, null, 2))
   }
 

@@ -712,8 +712,8 @@ export default function App() {
             </Typography>
 
             <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.6 }}>
-              Just a clean, light-weight and easy native macOS gRPC client designed for
-              fast progress.
+              Just a clean, light-weight and easy native macOS gRPC client designed for fast
+              progress.
             </Typography>
 
             <Paper
