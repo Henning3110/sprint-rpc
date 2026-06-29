@@ -11,10 +11,13 @@ describe('FormBuilder dynamic field mapping and state helpers', () => {
     test('should map strings and bytes to text input', () => {
       expect(getFieldInputType({ name: 'name', type: 'string' })).toBe('text')
       expect(getFieldInputType({ name: 'data', type: 'bytes' })).toBe('text')
+      expect(getFieldInputType({ name: 'name', type: 'TYPE_STRING' })).toBe('text')
+      expect(getFieldInputType({ name: 'data', type: 'TYPE_BYTES' })).toBe('text')
     })
 
     test('should map booleans to switch input', () => {
       expect(getFieldInputType({ name: 'isActive', type: 'bool' })).toBe('switch')
+      expect(getFieldInputType({ name: 'isActive', type: 'TYPE_BOOL' })).toBe('switch')
     })
 
     test('should map all protobuf integer types to integer input', () => {
@@ -32,12 +35,17 @@ describe('FormBuilder dynamic field mapping and state helpers', () => {
       ]
       for (const type of integerTypes) {
         expect(getFieldInputType({ name: 'val', type })).toBe('integer')
+        expect(getFieldInputType({ name: 'val', type: `TYPE_${type.toUpperCase()}` })).toBe(
+          'integer'
+        )
       }
     })
 
     test('should map float and double types to decimal input', () => {
       expect(getFieldInputType({ name: 'price', type: 'float' })).toBe('decimal')
       expect(getFieldInputType({ name: 'ratio', type: 'double' })).toBe('decimal')
+      expect(getFieldInputType({ name: 'price', type: 'TYPE_FLOAT' })).toBe('decimal')
+      expect(getFieldInputType({ name: 'ratio', type: 'TYPE_DOUBLE' })).toBe('decimal')
     })
 
     test('should map google.protobuf.Timestamp to datetime input', () => {
@@ -45,6 +53,13 @@ describe('FormBuilder dynamic field mapping and state helpers', () => {
         getFieldInputType({
           name: 'createdAt',
           type: 'message',
+          typeName: '.google.protobuf.Timestamp'
+        })
+      ).toBe('datetime')
+      expect(
+        getFieldInputType({
+          name: 'createdAt',
+          type: 'TYPE_MESSAGE',
           typeName: '.google.protobuf.Timestamp'
         })
       ).toBe('datetime')
@@ -56,6 +71,13 @@ describe('FormBuilder dynamic field mapping and state helpers', () => {
           name: 'address',
           type: 'message',
           fields: [{ name: 'street', type: 'string' }]
+        })
+      ).toBe('message')
+      expect(
+        getFieldInputType({
+          name: 'address',
+          type: 'TYPE_MESSAGE',
+          fields: [{ name: 'street', type: 'TYPE_STRING' }]
         })
       ).toBe('message')
     })

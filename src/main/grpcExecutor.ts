@@ -82,7 +82,9 @@ export function executeRpcCall(
         }
       } else {
         const ancestors = getAncestorDirectories(options.protoPath)
-        const resolvedImportPaths = Array.from(new Set([...(options.importPaths || []), ...ancestors]))
+        const resolvedImportPaths = Array.from(
+          new Set([...(options.importPaths || []), ...ancestors])
+        )
 
         packageDefinition = protoLoader.loadSync(options.protoPath, {
           keepCase: true,
