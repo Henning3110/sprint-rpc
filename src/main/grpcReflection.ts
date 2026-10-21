@@ -1,6 +1,6 @@
 import * as grpc from '@grpc/grpc-js'
 import { GrpcReflection } from 'grpc-js-reflection-client'
-import { parsePackageDefinition } from './protoParser'
+import { parseProtoRoots } from './protoParser'
 import { ProtoPackage } from '../renderer/src/store/useGrpcStore'
 
 export interface ReflectionResult {
@@ -31,13 +31,17 @@ export async function fetchServicesAndPackagesFromReflection(
     }
 
     const masterPackageDefinition: any = {}
+    const roots: any[] = []
 
     // 4. Retrieve descriptors for each service in parallel and merge their package definitions
     const descriptorResults = await Promise.all(
       userServices.map(async (serviceName) => {
         try {
           const descriptor = await reflectionClient.getDescriptorBySymbol(serviceName)
-          return descriptor.getPackageDefinition()
+          return {
+            packageDefinition: descriptor.getPackageDefinition(),
+            root: descriptor.getProtobufJsRoot()
+          }
         } catch (err: any) {
           console.warn(`Failed to fetch descriptor for service ${serviceName}:`, err.message)
           return null
@@ -45,9 +49,10 @@ export async function fetchServicesAndPackagesFromReflection(
       })
     )
 
-    for (const pkgDef of descriptorResults) {
-      if (pkgDef) {
-        Object.assign(masterPackageDefinition, pkgDef)
+    for (const result of descriptorResults) {
+      if (result) {
+        Object.assign(masterPackageDefinition, result.packageDefinition)
+        roots.push(result.root)
       }
     }
 
@@ -55,8 +60,8 @@ export async function fetchServicesAndPackagesFromReflection(
       throw new Error('Failed to retrieve descriptors for any of the discovered services.')
     }
 
-    // 5. Parse the merged definitions into the frontend package structure
-    const packages = parsePackageDefinition(masterPackageDefinition)
+    // 5. Parse the resolved protobuf.js roots into the frontend package structure
+    const packages = parseProtoRoots(roots)
 
     return {
       packages,

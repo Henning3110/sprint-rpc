@@ -1,36 +1,36 @@
 import { describe, test, expect } from 'vitest'
 import * as path from 'path'
-import { parsePackageDefinition, getAncestorDirectories, parseProtoFile } from '../protoParser'
+import * as protobuf from 'protobufjs'
+import { FileDescriptorSet } from 'protobufjs/ext/descriptor'
+import { parseProtoRoots, getAncestorDirectories, parseProtoFile } from '../protoParser'
 
 const fixture = (name: string): string => path.resolve(__dirname, 'fixtures', name)
 
-const findMethod = (packages: any[], methodName: string): any =>
+const parseSource = (source: string): any[] =>
+  parseProtoRoots([protobuf.parse(source, { keepCase: true }).root])
+
+const findMethod = (packages: any[], methodName: string, serviceName?: string): any =>
   packages
     .flatMap((p) => p.services)
+    .filter((s) => !serviceName || s.name === serviceName)
     .flatMap((s) => s.methods)
     .find((m) => m.name === methodName)
 
+const findField = (fields: any[], name: string): any => fields.find((f: any) => f.name === name)
+
+const fieldNames = (fields: any[]): string[] => fields.map((f: any) => f.name)
+
 describe('gRPC Protobuf Schema Parser Unit Tests', () => {
   test('should parse unary services and methods successfully', () => {
-    const mockPackageDefinition = {
-      'helloworld.Greeter': {
-        SayHello: {
-          path: '/helloworld.Greeter/SayHello',
-          requestStream: false,
-          responseStream: false,
-          requestType: {
-            name: 'HelloRequest',
-            type: { name: 'HelloRequest' }
-          },
-          responseType: {
-            name: 'HelloReply',
-            type: { name: 'HelloReply' }
-          }
-        }
+    const result = parseSource(`
+      syntax = "proto3";
+      package helloworld;
+      message HelloRequest {}
+      message HelloReply {}
+      service Greeter {
+        rpc SayHello(HelloRequest) returns (HelloReply);
       }
-    }
-
-    const result = parsePackageDefinition(mockPackageDefinition)
+    `)
 
     expect(result).toHaveLength(1)
     expect(result[0].name).toBe('helloworld')
@@ -51,51 +51,17 @@ describe('gRPC Protobuf Schema Parser Unit Tests', () => {
   })
 
   test('should parse streaming RPC classifications correctly', () => {
-    const mockPackageDefinition = {
-      'streaming.StreamService': {
-        ServerSideStream: {
-          path: '/streaming.StreamService/ServerSideStream',
-          requestStream: false,
-          responseStream: true,
-          requestType: {
-            name: 'StreamRequest',
-            type: { name: 'StreamRequest' }
-          },
-          responseType: {
-            name: 'StreamReply',
-            type: { name: 'StreamReply' }
-          }
-        },
-        ClientSideStream: {
-          path: '/streaming.StreamService/ClientSideStream',
-          requestStream: true,
-          responseStream: false,
-          requestType: {
-            name: 'StreamRequest',
-            type: { name: 'StreamRequest' }
-          },
-          responseType: {
-            name: 'StreamReply',
-            type: { name: 'StreamReply' }
-          }
-        },
-        BidiStream: {
-          path: '/streaming.StreamService/BidiStream',
-          requestStream: true,
-          responseStream: true,
-          requestType: {
-            name: 'StreamRequest',
-            type: { name: 'StreamRequest' }
-          },
-          responseType: {
-            name: 'StreamReply',
-            type: { name: 'StreamReply' }
-          }
-        }
+    const result = parseSource(`
+      syntax = "proto3";
+      package streaming;
+      message StreamRequest {}
+      message StreamReply {}
+      service StreamService {
+        rpc ServerSideStream(StreamRequest) returns (stream StreamReply);
+        rpc ClientSideStream(stream StreamRequest) returns (StreamReply);
+        rpc BidiStream(stream StreamRequest) returns (stream StreamReply);
       }
-    }
-
-    const result = parsePackageDefinition(mockPackageDefinition)
+    `)
     expect(result).toHaveLength(1)
 
     const methods = result[0].services[0].methods
@@ -115,36 +81,19 @@ describe('gRPC Protobuf Schema Parser Unit Tests', () => {
   })
 
   test('should extract request message fields for automatic JSON template generation', () => {
-    const mockPackageDefinition = {
-      'sample.UserService': {
-        CreateUser: {
-          path: '/sample.UserService/CreateUser',
-          requestStream: false,
-          responseStream: false,
-          requestType: {
-            name: 'CreateUserRequest',
-            type: { name: 'CreateUserRequest' }
-          },
-          responseType: {
-            name: 'CreateUserResponse',
-            type: { name: 'CreateUserResponse' }
-          }
-        }
-      },
-      // Mimic descriptor details returned by proto-loader for fields resolution
-      'sample.CreateUserRequest': {
-        format: 'DescriptorProto',
-        type: {
-          field: [
-            { name: 'username', type: 'string', repeated: false },
-            { name: 'age', type: 'int32', repeated: false },
-            { name: 'roles', type: 'string', repeated: true }
-          ]
-        }
+    const result = parseSource(`
+      syntax = "proto3";
+      package sample;
+      message CreateUserRequest {
+        string username = 1;
+        int32 age = 2;
+        repeated string roles = 3;
       }
-    }
-
-    const result = parsePackageDefinition(mockPackageDefinition)
+      message CreateUserResponse {}
+      service UserService {
+        rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+      }
+    `)
     const method = result[0].services[0].methods[0]
 
     expect(method.requestFields).toBeDefined()
@@ -160,28 +109,20 @@ describe('gRPC Protobuf Schema Parser Unit Tests', () => {
   })
 
   test('should group multiple services in the same package together', () => {
-    const mockPackageDefinition = {
-      'org.company.Billing': {
-        Charge: {
-          path: '/org.company.Billing/Charge',
-          requestStream: false,
-          responseStream: false,
-          requestType: { name: 'ChargeRequest', type: { name: 'ChargeRequest' } },
-          responseType: { name: 'ChargeResponse', type: { name: 'ChargeResponse' } }
-        }
-      },
-      'org.company.Inventory': {
-        CheckStock: {
-          path: '/org.company.Inventory/CheckStock',
-          requestStream: false,
-          responseStream: false,
-          requestType: { name: 'CheckRequest', type: { name: 'CheckRequest' } },
-          responseType: { name: 'CheckResponse', type: { name: 'CheckResponse' } }
-        }
+    const result = parseSource(`
+      syntax = "proto3";
+      package org.company;
+      message ChargeRequest {}
+      message ChargeResponse {}
+      message CheckRequest {}
+      message CheckResponse {}
+      service Billing {
+        rpc Charge(ChargeRequest) returns (ChargeResponse);
       }
-    }
-
-    const result = parsePackageDefinition(mockPackageDefinition)
+      service Inventory {
+        rpc CheckStock(CheckRequest) returns (CheckResponse);
+      }
+    `)
 
     expect(result).toHaveLength(1)
     expect(result[0].name).toBe('org.company')
@@ -193,43 +134,22 @@ describe('gRPC Protobuf Schema Parser Unit Tests', () => {
   })
 
   test('should recursively parse submessages and check nested fields resolution', () => {
-    const mockPackageDefinition = {
-      'sample.UserService': {
-        CreateUser: {
-          path: '/sample.UserService/CreateUser',
-          requestStream: false,
-          responseStream: false,
-          requestType: {
-            name: 'CreateUserRequest',
-            type: { name: 'CreateUserRequest' }
-          },
-          responseType: {
-            name: 'CreateUserResponse',
-            type: { name: 'CreateUserResponse' }
-          }
-        }
-      },
-      'sample.CreateUserRequest': {
-        format: 'DescriptorProto',
-        type: {
-          field: [
-            { name: 'username', type: 'string', repeated: false },
-            { name: 'address', type: 'TYPE_MESSAGE', typeName: 'Address', repeated: false }
-          ]
-        }
-      },
-      'sample.Address': {
-        format: 'DescriptorProto',
-        type: {
-          field: [
-            { name: 'street', type: 'string', repeated: false },
-            { name: 'zip', type: 'int32', repeated: false }
-          ]
-        }
+    const result = parseSource(`
+      syntax = "proto3";
+      package sample;
+      message CreateUserRequest {
+        string username = 1;
+        Address address = 2;
       }
-    }
-
-    const result = parsePackageDefinition(mockPackageDefinition)
+      message Address {
+        string street = 1;
+        int32 zip = 2;
+      }
+      message CreateUserResponse {}
+      service UserService {
+        rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+      }
+    `)
     const method = result[0].services[0].methods[0]
 
     expect(method.requestFields).toBeDefined()
@@ -249,17 +169,17 @@ describe('gRPC Protobuf Schema Parser Unit Tests', () => {
     const packages = parseProtoFile(fixture('users.proto'))
 
     const getUser = findMethod(packages, 'GetUser')
-    expect(getUser.requestFields.map((f: any) => f.name)).toEqual(['id', 'include_deleted'])
+    expect(fieldNames(getUser.requestFields)).toEqual(['id', 'include_deleted'])
 
     const createUser = findMethod(packages, 'CreateUser')
-    expect(createUser.requestFields.map((f: any) => f.name)).toEqual(['name', 'age'])
+    expect(fieldNames(createUser.requestFields)).toEqual(['name', 'age'])
   })
 
   test('should resolve same-named request types from different packages', () => {
     const packages = parseProtoFile(fixture('shop.proto'))
 
     const updateUser = findMethod(packages, 'UpdateUser')
-    expect(updateUser.requestFields.map((f: any) => f.name)).toEqual([
+    expect(fieldNames(updateUser.requestFields)).toEqual([
       'name',
       'address',
       'status',
@@ -268,75 +188,103 @@ describe('gRPC Protobuf Schema Parser Unit Tests', () => {
     ])
 
     const updateOtherUser = findMethod(packages, 'UpdateOtherUser')
-    expect(updateOtherUser.requestFields.map((f: any) => f.name)).toEqual(['id'])
+    expect(fieldNames(updateOtherUser.requestFields)).toEqual(['id'])
 
     const updateInner = findMethod(packages, 'UpdateInner')
-    expect(updateInner.requestFields.map((f: any) => f.name)).toEqual(['n'])
+    expect(fieldNames(updateInner.requestFields)).toEqual(['n'])
   })
 
   test('should resolve relative field types against the enclosing scope', () => {
     const packages = parseProtoFile(fixture('shop.proto'))
     const fields = findMethod(packages, 'UpdateUser').requestFields
 
-    const address = fields.find((f: any) => f.name === 'address')
-    expect(address.fields.map((f: any) => f.name)).toEqual(['street'])
-
-    const inner = fields.find((f: any) => f.name === 'inner')
-    expect(inner.fields.map((f: any) => f.name)).toEqual(['n'])
+    expect(fieldNames(findField(fields, 'address').fields)).toEqual(['street'])
+    expect(fieldNames(findField(fields, 'inner').fields)).toEqual(['n'])
 
     // shop.v1.Status is an enum and must not pick up the other.v1.Status message
-    const status = fields.find((f: any) => f.name === 'status')
+    const status = findField(fields, 'status')
+    expect(status.type).toBe('enum')
+    expect(status.typeName).toBe('.shop.v1.Status')
     expect(status.fields).toBeUndefined()
-
-    // Map fields are filled as plain objects, not as their synthetic entry messages
-    const tags = fields.find((f: any) => f.name === 'tags')
-    expect(tags.fields).toBeUndefined()
   })
 
-  test('should resolve fully qualified field types from reflection descriptors', () => {
-    // Descriptors compiled by protoc carry absolute type names with a leading dot
-    const mockPackageDefinition = {
-      'shop.v1.Shop': {
-        UpdateUser: {
-          path: '/shop.v1.Shop/UpdateUser',
-          requestStream: false,
-          responseStream: false,
-          requestType: { name: 'User', type: { name: 'User' } },
-          responseType: { name: 'User', type: { name: 'User' } }
-        }
-      },
-      'shop.v1.User': {
-        format: 'Protocol Buffer 3 DescriptorProto',
-        type: {
-          name: 'User',
-          field: [
-            { name: 'address', type: 'TYPE_MESSAGE', typeName: '.shop.v1.Address' },
-            { name: 'status', type: 'TYPE_ENUM', typeName: '.shop.v1.Status' }
+  test('should resolve same-layout messages to the types of their own package', () => {
+    const packages = parseProtoFile(fixture('scopes_b.proto'))
+
+    const aSame = findMethod(packages, 'DoSame', 'A').requestFields
+    expect(fieldNames(findField(aSame, 'item').fields)).toEqual(['a_item'])
+
+    const bSame = findMethod(packages, 'DoSame', 'T').requestFields
+    expect(fieldNames(findField(bSame, 'item').fields)).toEqual(['b_item'])
+  })
+
+  test('should resolve absolute field types past same-named nested types', () => {
+    const packages = parseProtoFile(fixture('scopes_a.proto'))
+    const fields = findMethod(packages, 'DoReq').requestFields
+
+    const top = findField(findField(fields, 'inner').fields, 'top')
+    expect(top.typeName).toBe('.a.Item')
+    expect(fieldNames(top.fields)).toEqual(['a_item'])
+  })
+
+  test('should fill map fields as plain objects', () => {
+    const packages = parseProtoFile(fixture('scopes_a.proto'))
+    const fields = findMethod(packages, 'DoReq').requestFields
+
+    // The map entry is named Labels like the unrelated a.Labels message
+    const labels = findField(fields, 'labels')
+    expect(labels.type).toBe('message')
+    expect(labels.typeName).toBe('map<string, string>')
+    expect(labels.repeated).toBe(false)
+    expect(labels.fields).toBeUndefined()
+  })
+
+  test('should report absolute type names and repeated labels', () => {
+    const packages = parseProtoFile(fixture('scopes_a.proto'))
+    const fields = findMethod(packages, 'DoReq').requestFields
+
+    // FormBuilder shows a datetime picker for exactly this type name
+    expect(findField(fields, 'created_at').typeName).toBe('.google.protobuf.Timestamp')
+    expect(findField(fields, 'tags').repeated).toBe(true)
+  })
+
+  test('should parse roots built from reflection descriptors', () => {
+    // Server reflection returns descriptors compiled by protoc with absolute type names
+    const descriptorSet = FileDescriptorSet.fromObject({
+      file: [
+        {
+          name: 'a.proto',
+          package: 'a',
+          syntax: 'proto3',
+          messageType: [
+            { name: 'Item', field: [{ name: 'a_item', number: 1, type: 'TYPE_STRING' }] },
+            {
+              name: 'Req',
+              field: [
+                { name: 'top', number: 1, type: 'TYPE_MESSAGE', typeName: '.a.Item' },
+                { name: 'nested', number: 2, type: 'TYPE_MESSAGE', typeName: '.a.Req.Item' }
+              ],
+              nestedType: [
+                { name: 'Item', field: [{ name: 'nested_item', number: 1, type: 'TYPE_STRING' }] }
+              ]
+            }
+          ],
+          service: [
+            { name: 'A', method: [{ name: 'DoReq', inputType: '.a.Req', outputType: '.a.Req' }] }
           ]
         }
-      },
-      'shop.v1.Address': {
-        format: 'Protocol Buffer 3 DescriptorProto',
-        type: { name: 'Address', field: [{ name: 'street', type: 'TYPE_STRING' }] }
-      },
-      'shop.v1.Status': {
-        format: 'Protocol Buffer 3 EnumDescriptorProto',
-        type: { name: 'Status', value: [{ name: 'UNKNOWN', number: 0 }] }
-      },
-      'other.v1.Status': {
-        format: 'Protocol Buffer 3 DescriptorProto',
-        type: { name: 'Status', field: [{ name: 'reason', type: 'TYPE_STRING' }] }
-      }
-    }
+      ]
+    })
+    const fromDescriptor = (protobuf.Root as any).fromDescriptor
 
-    const result = parsePackageDefinition(mockPackageDefinition)
-    const fields = findMethod(result, 'UpdateUser').requestFields
+    // Reflection yields one root per service, each containing the whole file
+    const packages = parseProtoRoots([fromDescriptor(descriptorSet), fromDescriptor(descriptorSet)])
+    expect(packages).toHaveLength(1)
+    expect(packages[0].services).toHaveLength(1)
 
-    const address = fields.find((f: any) => f.name === 'address')
-    expect(address.fields.map((f: any) => f.name)).toEqual(['street'])
-
-    const status = fields.find((f: any) => f.name === 'status')
-    expect(status.fields).toBeUndefined()
+    const fields = findMethod(packages, 'DoReq').requestFields
+    expect(fieldNames(findField(fields, 'top').fields)).toEqual(['a_item'])
+    expect(fieldNames(findField(fields, 'nested').fields)).toEqual(['nested_item'])
   })
 
   test('should generate ancestor directories list correctly', () => {

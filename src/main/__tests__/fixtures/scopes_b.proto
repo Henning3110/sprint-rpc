@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package b;
+
+import "scopes_a.proto";
+
+message Item {
+  string b_item = 1;
+}
+
+// Same layout as a.Same, but its Item resolves to b.Item
+message Same {
+  Item item = 1;
+}
+
+service T {
+  rpc DoSame(Same) returns (Same);
+}
