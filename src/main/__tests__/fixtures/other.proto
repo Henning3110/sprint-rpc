@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package other.v1;
+
+message User {
+  int64 id = 1;
+}
+
+// Same name as the shop.v1.Status enum
+message Status {
+  string reason = 1;
+}

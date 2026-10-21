@@ -2,57 +2,80 @@ import * as protoLoader from '@grpc/proto-loader'
 import * as path from 'path'
 import { ProtoPackage, ProtoService, ProtoMethod } from '../renderer/src/store/useGrpcStore'
 
-function findMessageTypeFields(typeName: string, messageTypes: Record<string, any>): any[] | null {
-  const clean = typeName.startsWith('.') ? typeName.substring(1) : typeName
+// proto-loader only lists top-level types, so register nested messages and enums
+// from their parent's descriptor. Map entries are skipped: maps are filled as plain objects.
+function collectNestedTypes(
+  parentKey: string,
+  descriptor: any,
+  messageTypes: Record<string, any>,
+  typeKeys: Set<string>
+): void {
+  for (const nested of descriptor.nestedType ?? []) {
+    if (nested.options?.mapEntry) continue
+    const nestedKey = `${parentKey}.${nested.name}`
+    typeKeys.add(nestedKey)
+    messageTypes[nestedKey] = nested
+    collectNestedTypes(nestedKey, nested, messageTypes, typeKeys)
+  }
+  for (const nestedEnum of descriptor.enumType ?? []) {
+    typeKeys.add(`${parentKey}.${nestedEnum.name}`)
+  }
+}
 
-  // 1. Direct match
-  if (messageTypes[clean]) return messageTypes[clean]
-
-  // 2. Registry ends with clean (registry: 'testpkg.SubMessage', clean: 'SubMessage')
-  const match1 = Object.keys(messageTypes).find((k) => k.endsWith(clean))
-  if (match1) return messageTypes[match1]
-
-  // 3. Clean ends with registry (clean: 'testpkg.SubMessage', registry: 'SubMessage')
-  const match2 = Object.keys(messageTypes).find((k) => clean.endsWith(k))
-  if (match2) return messageTypes[match2]
-
-  // 4. Fallback: match the last segment of both (both end with 'SubMessage')
-  const lastSegment = clean.split('.').pop()
-  if (lastSegment) {
-    const match3 = Object.keys(messageTypes).find((k) => k.split('.').pop() === lastSegment)
-    if (match3) return messageTypes[match3]
+// Resolve a field's type reference the way protoc does: absolute names (leading dot)
+// as-is, relative names against each enclosing scope from the innermost outwards.
+// typeKeys holds messages and enums, so an enum shadows an equally named message further out.
+function resolveTypeName(typeName: string, scope: string, typeKeys: Set<string>): string | null {
+  if (typeName.startsWith('.')) {
+    const absolute = typeName.substring(1)
+    return typeKeys.has(absolute) ? absolute : null
   }
 
+  const scopeParts = scope.split('.')
+  for (let i = scopeParts.length; i >= 0; i--) {
+    const candidate = [...scopeParts.slice(0, i), typeName].join('.')
+    if (typeKeys.has(candidate)) return candidate
+  }
   return null
 }
 
+// A method's request type only carries its short name, so pick the message with that
+// name whose descriptor matches; both are generated from the same protobufjs type.
+function findRequestTypeKey(requestType: any, messageTypes: Record<string, any>): string | null {
+  const name = requestType.type?.name || requestType.name
+  const candidates = Object.keys(messageTypes).filter((k) => k === name || k.endsWith(`.${name}`))
+  if (candidates.length <= 1) return candidates[0] ?? null
+
+  const descriptor = JSON.stringify(requestType.type)
+  return candidates.find((k) => JSON.stringify(messageTypes[k]) === descriptor) ?? null
+}
+
 function resolveFieldsRecursive(
-  fields: any[],
+  messageKey: string,
   messageTypes: Record<string, any>,
+  typeKeys: Set<string>,
   visited: Set<string> = new Set()
 ): any[] {
+  const fields = messageTypes[messageKey]?.field
   if (!fields) return []
+
   return fields.map((field) => {
     if (field.typeName) {
-      const cleanTypeName = field.typeName.startsWith('.')
-        ? field.typeName.substring(1)
-        : field.typeName
+      const typeKey = resolveTypeName(field.typeName, messageKey, typeKeys)
 
-      // Find the message definition using our bulletproof lookup
-      const subFields = findMessageTypeFields(cleanTypeName, messageTypes)
-
-      if (subFields) {
-        if (visited.has(cleanTypeName) || visited.size > 15) {
+      // Enums resolve to a type key too, but only messages get nested fields
+      if (typeKey && messageTypes[typeKey]) {
+        if (visited.has(typeKey) || visited.size > 15) {
           return {
             ...field,
             fields: []
           }
         }
         const nextVisited = new Set(visited)
-        nextVisited.add(cleanTypeName)
+        nextVisited.add(typeKey)
         return {
           ...field,
-          fields: resolveFieldsRecursive(subFields, messageTypes, nextVisited)
+          fields: resolveFieldsRecursive(typeKey, messageTypes, typeKeys, nextVisited)
         }
       }
     }
@@ -63,12 +86,17 @@ function resolveFieldsRecursive(
 export function parsePackageDefinition(packageDefinition: any): ProtoPackage[] {
   const packagesMap: Record<string, ProtoPackage> = {}
 
-  // First, let's collect all message type fields so we can resolve them for methods
+  // First, collect all named types so field and request types can be resolved
   const messageTypes: Record<string, any> = {}
+  const typeKeys = new Set<string>()
   for (const [key, value] of Object.entries(packageDefinition)) {
     const def = value as any
+    if (def && typeof def.format === 'string') {
+      typeKeys.add(key)
+    }
     if (def && def.type && Array.isArray(def.type.field)) {
-      messageTypes[key] = def.type.field
+      messageTypes[key] = def.type
+      collectNestedTypes(key, def.type, messageTypes, typeKeys)
     }
   }
 
@@ -101,12 +129,10 @@ export function parsePackageDefinition(packageDefinition: any): ProtoPackage[] {
         const requestTypeFullName = methodDef.requestType.type.name || methodDef.requestType.name
         const responseTypeFullName = methodDef.responseType.type.name || methodDef.responseType.name
 
-        // Try to resolve request fields using our bulletproof lookup helper
-        let resolvedFields = findMessageTypeFields(requestTypeFullName, messageTypes)
-
-        if (resolvedFields) {
-          resolvedFields = resolveFieldsRecursive(resolvedFields, messageTypes)
-        }
+        const requestTypeKey = findRequestTypeKey(methodDef.requestType, messageTypes)
+        const resolvedFields = requestTypeKey
+          ? resolveFieldsRecursive(requestTypeKey, messageTypes, typeKeys)
+          : null
 
         methods.push({
           name: methodName,

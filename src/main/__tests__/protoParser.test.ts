@@ -1,6 +1,14 @@
 import { describe, test, expect } from 'vitest'
 import * as path from 'path'
-import { parsePackageDefinition, getAncestorDirectories } from '../protoParser'
+import { parsePackageDefinition, getAncestorDirectories, parseProtoFile } from '../protoParser'
+
+const fixture = (name: string): string => path.resolve(__dirname, 'fixtures', name)
+
+const findMethod = (packages: any[], methodName: string): any =>
+  packages
+    .flatMap((p) => p.services)
+    .flatMap((s) => s.methods)
+    .find((m) => m.name === methodName)
 
 describe('gRPC Protobuf Schema Parser Unit Tests', () => {
   test('should parse unary services and methods successfully', () => {
@@ -235,6 +243,100 @@ describe('gRPC Protobuf Schema Parser Unit Tests', () => {
     const streetField = addressField.fields.find((f: any) => f.name === 'street')
     expect(streetField).toBeDefined()
     expect(streetField.type).toBe('string')
+  })
+
+  test('should not confuse request types whose names share a suffix', () => {
+    const packages = parseProtoFile(fixture('users.proto'))
+
+    const getUser = findMethod(packages, 'GetUser')
+    expect(getUser.requestFields.map((f: any) => f.name)).toEqual(['id', 'include_deleted'])
+
+    const createUser = findMethod(packages, 'CreateUser')
+    expect(createUser.requestFields.map((f: any) => f.name)).toEqual(['name', 'age'])
+  })
+
+  test('should resolve same-named request types from different packages', () => {
+    const packages = parseProtoFile(fixture('shop.proto'))
+
+    const updateUser = findMethod(packages, 'UpdateUser')
+    expect(updateUser.requestFields.map((f: any) => f.name)).toEqual([
+      'name',
+      'address',
+      'status',
+      'inner',
+      'tags'
+    ])
+
+    const updateOtherUser = findMethod(packages, 'UpdateOtherUser')
+    expect(updateOtherUser.requestFields.map((f: any) => f.name)).toEqual(['id'])
+
+    const updateInner = findMethod(packages, 'UpdateInner')
+    expect(updateInner.requestFields.map((f: any) => f.name)).toEqual(['n'])
+  })
+
+  test('should resolve relative field types against the enclosing scope', () => {
+    const packages = parseProtoFile(fixture('shop.proto'))
+    const fields = findMethod(packages, 'UpdateUser').requestFields
+
+    const address = fields.find((f: any) => f.name === 'address')
+    expect(address.fields.map((f: any) => f.name)).toEqual(['street'])
+
+    const inner = fields.find((f: any) => f.name === 'inner')
+    expect(inner.fields.map((f: any) => f.name)).toEqual(['n'])
+
+    // shop.v1.Status is an enum and must not pick up the other.v1.Status message
+    const status = fields.find((f: any) => f.name === 'status')
+    expect(status.fields).toBeUndefined()
+
+    // Map fields are filled as plain objects, not as their synthetic entry messages
+    const tags = fields.find((f: any) => f.name === 'tags')
+    expect(tags.fields).toBeUndefined()
+  })
+
+  test('should resolve fully qualified field types from reflection descriptors', () => {
+    // Descriptors compiled by protoc carry absolute type names with a leading dot
+    const mockPackageDefinition = {
+      'shop.v1.Shop': {
+        UpdateUser: {
+          path: '/shop.v1.Shop/UpdateUser',
+          requestStream: false,
+          responseStream: false,
+          requestType: { name: 'User', type: { name: 'User' } },
+          responseType: { name: 'User', type: { name: 'User' } }
+        }
+      },
+      'shop.v1.User': {
+        format: 'Protocol Buffer 3 DescriptorProto',
+        type: {
+          name: 'User',
+          field: [
+            { name: 'address', type: 'TYPE_MESSAGE', typeName: '.shop.v1.Address' },
+            { name: 'status', type: 'TYPE_ENUM', typeName: '.shop.v1.Status' }
+          ]
+        }
+      },
+      'shop.v1.Address': {
+        format: 'Protocol Buffer 3 DescriptorProto',
+        type: { name: 'Address', field: [{ name: 'street', type: 'TYPE_STRING' }] }
+      },
+      'shop.v1.Status': {
+        format: 'Protocol Buffer 3 EnumDescriptorProto',
+        type: { name: 'Status', value: [{ name: 'UNKNOWN', number: 0 }] }
+      },
+      'other.v1.Status': {
+        format: 'Protocol Buffer 3 DescriptorProto',
+        type: { name: 'Status', field: [{ name: 'reason', type: 'TYPE_STRING' }] }
+      }
+    }
+
+    const result = parsePackageDefinition(mockPackageDefinition)
+    const fields = findMethod(result, 'UpdateUser').requestFields
+
+    const address = fields.find((f: any) => f.name === 'address')
+    expect(address.fields.map((f: any) => f.name)).toEqual(['street'])
+
+    const status = fields.find((f: any) => f.name === 'status')
+    expect(status.fields).toBeUndefined()
   })
 
   test('should generate ancestor directories list correctly', () => {
