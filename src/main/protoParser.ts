@@ -1,132 +1,123 @@
-import * as protoLoader from '@grpc/proto-loader'
+import * as fs from 'fs'
 import * as path from 'path'
+import * as protobuf from 'protobufjs'
 import { ProtoPackage, ProtoService, ProtoMethod } from '../renderer/src/store/useGrpcStore'
 
-function findMessageTypeFields(typeName: string, messageTypes: Record<string, any>): any[] | null {
-  const clean = typeName.startsWith('.') ? typeName.substring(1) : typeName
+// Reflection roots come from this protobufjs and from the separate copy bundled with
+// grpc-js-reflection-client, so objects are told apart by shape instead of instanceof.
+function isNamespace(obj: protobuf.ReflectionObject): obj is protobuf.Namespace {
+  return 'nestedArray' in obj
+}
 
-  // 1. Direct match
-  if (messageTypes[clean]) return messageTypes[clean]
+function isService(obj: protobuf.ReflectionObject): obj is protobuf.Service {
+  return 'methods' in obj
+}
 
-  // 2. Registry ends with clean (registry: 'testpkg.SubMessage', clean: 'SubMessage')
-  const match1 = Object.keys(messageTypes).find((k) => k.endsWith(clean))
-  if (match1) return messageTypes[match1]
+function isMessageType(obj: protobuf.ReflectionObject): obj is protobuf.Type {
+  return 'fields' in obj
+}
 
-  // 3. Clean ends with registry (clean: 'testpkg.SubMessage', registry: 'SubMessage')
-  const match2 = Object.keys(messageTypes).find((k) => clean.endsWith(k))
-  if (match2) return messageTypes[match2]
-
-  // 4. Fallback: match the last segment of both (both end with 'SubMessage')
-  const lastSegment = clean.split('.').pop()
-  if (lastSegment) {
-    const match3 = Object.keys(messageTypes).find((k) => k.split('.').pop() === lastSegment)
-    if (match3) return messageTypes[match3]
+function toFormField(field: protobuf.Field, visited: Set<string>): any {
+  if (field.map) {
+    // Maps are filled as plain objects, so they get no nested fields
+    const { keyType } = field as unknown as protobuf.MapField
+    const valueType = field.resolvedType ? field.resolvedType.fullName.substring(1) : field.type
+    return {
+      name: field.name,
+      type: 'message',
+      typeName: `map<${keyType}, ${valueType}>`,
+      repeated: false
+    }
   }
 
-  return null
+  const resolvedType = field.resolvedType
+  if (!resolvedType) {
+    return { name: field.name, type: field.type, repeated: field.repeated }
+  }
+
+  // fullName is absolute with a leading dot, e.g. .google.protobuf.Timestamp
+  const typeName = resolvedType.fullName
+  if (!isMessageType(resolvedType)) {
+    return { name: field.name, type: 'enum', typeName, repeated: field.repeated }
+  }
+
+  if (visited.has(typeName) || visited.size > 15) {
+    return { name: field.name, type: 'message', typeName, repeated: field.repeated, fields: [] }
+  }
+  const nextVisited = new Set(visited)
+  nextVisited.add(typeName)
+  return {
+    name: field.name,
+    type: 'message',
+    typeName,
+    repeated: field.repeated,
+    fields: toFormFields(resolvedType, nextVisited)
+  }
 }
 
-function resolveFieldsRecursive(
-  fields: any[],
-  messageTypes: Record<string, any>,
-  visited: Set<string> = new Set()
-): any[] {
-  if (!fields) return []
-  return fields.map((field) => {
-    if (field.typeName) {
-      const cleanTypeName = field.typeName.startsWith('.')
-        ? field.typeName.substring(1)
-        : field.typeName
+function toFormFields(type: protobuf.Type, visited: Set<string> = new Set()): any[] {
+  return type.fieldsArray.map((field) => toFormField(field, visited))
+}
 
-      // Find the message definition using our bulletproof lookup
-      const subFields = findMessageTypeFields(cleanTypeName, messageTypes)
-
-      if (subFields) {
-        if (visited.has(cleanTypeName) || visited.size > 15) {
-          return {
-            ...field,
-            fields: []
-          }
-        }
-        const nextVisited = new Set(visited)
-        nextVisited.add(cleanTypeName)
-        return {
-          ...field,
-          fields: resolveFieldsRecursive(subFields, messageTypes, nextVisited)
-        }
-      }
+function collectServices(
+  namespace: protobuf.Namespace,
+  services: Map<string, protobuf.Service>
+): void {
+  for (const nested of namespace.nestedArray) {
+    if (isService(nested) && !services.has(nested.fullName)) {
+      services.set(nested.fullName, nested)
     }
-    return field
-  })
+    if (isNamespace(nested)) {
+      collectServices(nested, services)
+    }
+  }
 }
 
-export function parsePackageDefinition(packageDefinition: any): ProtoPackage[] {
+export function parseProtoRoots(roots: protobuf.Root[]): ProtoPackage[] {
   const packagesMap: Record<string, ProtoPackage> = {}
 
-  // First, let's collect all message type fields so we can resolve them for methods
-  const messageTypes: Record<string, any> = {}
-  for (const [key, value] of Object.entries(packageDefinition)) {
-    const def = value as any
-    if (def && def.type && Array.isArray(def.type.field)) {
-      messageTypes[key] = def.type.field
-    }
+  // Services are deduplicated by name, since reflection returns one root per service
+  // and each of them also contains the other services of the same file
+  const services = new Map<string, protobuf.Service>()
+  for (const root of roots) {
+    root.resolveAll()
+    collectServices(root, services)
   }
 
-  // Now, let's iterate and collect all services
-  for (const [key, value] of Object.entries(packageDefinition)) {
-    const def = value as any
+  for (const service of services.values()) {
+    const key = service.fullName.substring(1)
+    const lastDotIndex = key.lastIndexOf('.')
+    const packageName = lastDotIndex !== -1 ? key.substring(0, lastDotIndex) : 'default'
+    const serviceName = lastDotIndex !== -1 ? key.substring(lastDotIndex + 1) : key
 
-    // Determine if it's a service
-    const isService =
-      def &&
-      typeof def === 'object' &&
-      !def.format &&
-      Object.values(def).length > 0 &&
-      Object.values(def).every((m: any) => m && typeof m === 'object' && 'path' in m)
-
-    if (isService) {
-      const lastDotIndex = key.lastIndexOf('.')
-      const packageName = lastDotIndex !== -1 ? key.substring(0, lastDotIndex) : 'default'
-      const serviceName = lastDotIndex !== -1 ? key.substring(lastDotIndex + 1) : key
-
-      if (!packagesMap[packageName]) {
-        packagesMap[packageName] = {
-          name: packageName,
-          services: []
-        }
+    if (!packagesMap[packageName]) {
+      packagesMap[packageName] = {
+        name: packageName,
+        services: []
       }
-
-      const methods: ProtoMethod[] = []
-      for (const [methodName, methodDef] of Object.entries(def) as any[]) {
-        const requestTypeFullName = methodDef.requestType.type.name || methodDef.requestType.name
-        const responseTypeFullName = methodDef.responseType.type.name || methodDef.responseType.name
-
-        // Try to resolve request fields using our bulletproof lookup helper
-        let resolvedFields = findMessageTypeFields(requestTypeFullName, messageTypes)
-
-        if (resolvedFields) {
-          resolvedFields = resolveFieldsRecursive(resolvedFields, messageTypes)
-        }
-
-        methods.push({
-          name: methodName,
-          fullName: `${key}/${methodName}`,
-          requestType: requestTypeFullName,
-          responseType: responseTypeFullName,
-          requestStream: methodDef.requestStream,
-          responseStream: methodDef.responseStream,
-          requestFields: resolvedFields
-        })
-      }
-
-      const service: ProtoService = {
-        name: serviceName,
-        fullName: key,
-        methods
-      }
-
-      packagesMap[packageName].services.push(service)
     }
+
+    const methods: ProtoMethod[] = service.methodsArray.map((method) => {
+      const requestType = method.resolvedRequestType as protobuf.Type
+      const responseType = method.resolvedResponseType as protobuf.Type
+      return {
+        name: method.name,
+        fullName: `${key}/${method.name}`,
+        requestType: requestType.name,
+        responseType: responseType.name,
+        requestStream: Boolean(method.requestStream),
+        responseStream: Boolean(method.responseStream),
+        requestFields: toFormFields(requestType)
+      }
+    })
+
+    const protoService: ProtoService = {
+      name: serviceName,
+      fullName: key,
+      methods
+    }
+
+    packagesMap[packageName].services.push(protoService)
   }
 
   return Object.values(packagesMap)
@@ -150,21 +141,29 @@ export function getAncestorDirectories(filePath: string): string[] {
   return ancestors
 }
 
+// Resolves imports against the include dirs the same way @grpc/proto-loader does,
+// so the parsed schema matches the one the call is executed with
+function loadProtoRoot(protoPath: string, includeDirs: string[]): protobuf.Root {
+  const root = new protobuf.Root()
+  const originalResolvePath = root.resolvePath
+  root.resolvePath = (origin, target) => {
+    if (path.isAbsolute(target)) return target
+    for (const directory of includeDirs) {
+      const fullPath = path.join(directory, target)
+      if (fs.existsSync(fullPath)) return fullPath
+    }
+    return originalResolvePath(origin, target)
+  }
+  return root.loadSync(protoPath, { keepCase: true })
+}
+
 export function parseProtoFile(protoPath: string, importPaths: string[] = []): ProtoPackage[] {
   try {
     const ancestors = getAncestorDirectories(protoPath)
     const resolvedImportPaths = Array.from(new Set([...importPaths, ...ancestors]))
 
-    const packageDefinition = protoLoader.loadSync(protoPath, {
-      keepCase: true,
-      longs: String,
-      enums: String,
-      defaults: true,
-      oneofs: true,
-      includeDirs: resolvedImportPaths
-    })
-
-    return parsePackageDefinition(packageDefinition)
+    const root = loadProtoRoot(protoPath, resolvedImportPaths)
+    return parseProtoRoots([root])
   } catch (error) {
     console.error('Failed to parse proto file:', error)
     throw error

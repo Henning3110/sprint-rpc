@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package a;
+
+import "google/protobuf/timestamp.proto";
+
+// Shares its name with the capitalised map field below
+message Labels {
+  int32 x = 1;
+}
+
+message Item {
+  string a_item = 1;
+}
+
+message Same {
+  Item item = 1;
+}
+
+message Req {
+  message Inner {
+    // Absolute reference to the outer a.Item, not Req.Item
+    .a.Item top = 1;
+  }
+
+  message Item {
+    string nested_item = 1;
+  }
+
+  map<string, string> labels = 1;
+  Inner inner = 2;
+  google.protobuf.Timestamp created_at = 3;
+  repeated string tags = 4;
+}
+
+service A {
+  rpc DoReq(Req) returns (Req);
+  rpc DoSame(Same) returns (Same);
+}

@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package users;
+
+// GetUserRequest is declared first and its name ends with "UserRequest"
+message GetUserRequest {
+  string id = 1;
+  bool include_deleted = 2;
+}
+
+message UserRequest {
+  string name = 1;
+  int32 age = 2;
+}
+
+service Users {
+  rpc GetUser(GetUserRequest) returns (UserRequest);
+  rpc CreateUser(UserRequest) returns (UserRequest);
+}

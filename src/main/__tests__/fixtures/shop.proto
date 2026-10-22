@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package shop.v1;
+
+import "other.proto";
+
+enum Status {
+  UNKNOWN = 0;
+  ACTIVE = 1;
+}
+
+message Address {
+  string street = 1;
+}
+
+message User {
+  message Inner {
+    int32 n = 1;
+  }
+
+  string name = 1;
+  Address address = 2;
+  Status status = 3;
+  Inner inner = 4;
+  map<string, int32> tags = 5;
+}
+
+service Shop {
+  rpc UpdateUser(User) returns (User);
+  rpc UpdateOtherUser(other.v1.User) returns (User);
+  rpc UpdateInner(User.Inner) returns (User);
+}

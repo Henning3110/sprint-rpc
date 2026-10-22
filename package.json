@@ -34,6 +34,7 @@
     "@mui/icons-material": "^9.0.1",
     "@mui/material": "^9.0.1",
     "grpc-js-reflection-client": "^1.4.0",
+    "protobufjs": "^7.6.6",
     "zustand": "^5.0.13"
   },
   "devDependencies": {
